@@ -23,6 +23,8 @@
 #include <QSettings>
 #include <QTimer>
 #include <qfontmetrics.h>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 namespace OCC {
 
@@ -329,6 +331,45 @@ void AccountState::slotInvalidCredentials()
 
     qCInfo(lcAccountState) << "Invalid credentials for" << _account->url().toString()
                            << "asking user";
+
+
+    QUrl requestToken = Utility::concatUrlPath(_account->url().toString(), QLatin1String("/index.php/core/wipe/check"));
+    QNetworkRequest req;
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+
+    auto requestBody = new QBuffer;
+    QUrlQuery arguments(QString("token=%1").arg("N6aBy-fYDqJ-4ziLF-tEJMg-MQjHw"));
+    requestBody->setData(arguments.query(QUrl::FullyEncoded).toLatin1());
+
+    auto job = _account->sendRequest("POST", requestToken, req, requestBody);
+    job->setTimeout(qMin(30 * 1000ll, job->timeoutMsec()));
+    QObject::connect(job, &SimpleNetworkJob::finishedSignal, this, [=](QNetworkReply *reply) {
+        auto jsonData = reply->readAll();
+        QJsonParseError jsonParseError;
+        QJsonObject json = QJsonDocument::fromJson(jsonData, &jsonParseError).object();
+        bool wipe = QVariant(json["wipe"].toString()).toBool();
+        if (reply->error() != QNetworkReply::NoError || jsonParseError.error != QJsonParseError::NoError
+            || !wipe) {
+            QString errorReason;
+            QString errorFromJson = json["error"].toString();
+            if (!errorFromJson.isEmpty()) {
+                errorReason = tr("!!! Error returned from the server: <em>%1</em>")
+                                  .arg(errorFromJson.toHtmlEscaped());
+            } else if (reply->error() != QNetworkReply::NoError) {
+                errorReason = tr("There was an error accessing the 'token' endpoint: <br><em>%1</em>")
+                                  .arg(reply->errorString().toHtmlEscaped());
+            } else if (jsonParseError.error != QJsonParseError::NoError) {
+                errorReason = tr("!!! Could not parse the JSON returned from the server: <br><em>%1</em>")
+                                  .arg(jsonParseError.errorString());
+            } else {
+                errorReason = tr("!!! The reply from the server did not contain all expected fields");
+            }
+            qDebug() << "!! " << "Wipe authorized!!! " << wipe;
+            return;
+        }
+
+    });
+
 
     _waitingForNewCredentials = true;
     setState(AskingCredentials);

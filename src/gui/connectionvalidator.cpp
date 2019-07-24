@@ -24,6 +24,12 @@
 #include "account.h"
 #include "networkjobs.h"
 #include "clientproxy.h"
+#include "remotewipecheckjob.h"
+
+#include <QNetworkReply>
+#include <QBuffer>
+#include "networkjobs.h"
+
 #include <creds/abstractcredentials.h>
 
 namespace OCC {
@@ -183,12 +189,19 @@ void ConnectionValidator::slotAuthFailed(QNetworkReply *reply)
     auto job = qobject_cast<PropfindJob *>(sender());
     Status stat = Timeout;
 
+    QByteArray bytes = reply->readAll();
+    QString str = QString::fromUtf8(bytes.data(), bytes.size());
+
+    qDebug() << "!!! " << str;
+
+
     if (reply->error() == QNetworkReply::SslHandshakeFailedError) {
         _errors << job->errorStringParsingBody();
         stat = SslError;
 
     } else if (reply->error() == QNetworkReply::AuthenticationRequiredError
         || !_account->credentials()->stillValid(reply)) {
+
         qCWarning(lcConnectionValidator) << "******** Password is wrong!" << reply->error() << job->errorString();
         _errors << tr("The provided credentials are not correct");
         stat = CredentialsWrong;
